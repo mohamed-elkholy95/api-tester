@@ -33,12 +33,31 @@ async function streamBenchmark(endpoint, body, callbacks) {
                     const data = JSON.parse(line.slice(6));
                     if (eventType === "run_metric") callbacks.onRunMetric?.(data);
                     if (eventType === "suite_complete") callbacks.onComplete?.(data);
+                    if (eventType === "tick") callbacks.onTick?.(data);
+                    if (eventType === "token_chunk") callbacks.onTokenChunk?.(data);
+                    if (eventType === "stress_level_complete") callbacks.onStressLevel?.(data);
+                    if (eventType === "stress_complete") callbacks.onStressComplete?.(data);
+                    if (eventType === "cold_start_probe") callbacks.onColdProbe?.(data);
+                    if (eventType === "cold_start_complete") callbacks.onColdComplete?.(data);
                 } catch (e) {
                     console.warn("Failed to parse SSE data:", e);
                 }
             }
         }
     }
+}
+
+async function pingProvider(body) {
+    const resp = await fetch("/api/v1/benchmarks/ping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    return resp.json();
 }
 
 async function fetchProviders() {

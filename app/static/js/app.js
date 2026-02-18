@@ -23,6 +23,7 @@
         setupModeTabs();
         setupForm();
         setupHistory();
+        setupSpeedTests();
         await loadProviders();
         await loadPastResults();
     });
@@ -47,7 +48,7 @@
                     const sep = document.createElement('tr');
                     sep.className = 'run-separator';
                     const date = new Date(suite.created_at).toLocaleString();
-                    sep.innerHTML = `<td colspan="10" style="text-align:center; padding:0.4rem; font-size:0.7rem; color:var(--text-muted); border-bottom:1px solid var(--border-subtle); letter-spacing:0.03em;">── ${date} · ${suite.mode} · ${suite.provider_id}/${suite.model} ──</td>`;
+                    sep.innerHTML = `<td colspan="12" style="text-align:center; padding:0.4rem; font-size:0.7rem; color:var(--text-muted); border-bottom:1px solid var(--border-subtle); letter-spacing:0.03em;">── ${date} · ${suite.mode} · ${suite.provider_id}/${suite.model} ──</td>`;
                     tbody.appendChild(sep);
 
                     // Add each run row
@@ -62,6 +63,8 @@
                             tokens_per_second: r.tokens_per_second,
                             input_tokens: r.input_tokens,
                             output_tokens: r.output_tokens,
+                            inter_chunk_ms_avg: r.inter_chunk_ms_avg,
+                            total_words: r.total_words,
                         });
                     }
                 } catch (e) {
@@ -146,6 +149,9 @@
                 updateModelSelect(providerSelect.value);
             });
             updateModelSelect(providerSelect.value);
+
+            // Populate speed test provider selects
+            populateSpeedProviderSelects();
         } catch (e) {
             console.error('Failed to load providers:', e);
             $('#provider-select').innerHTML = '<option value="">Error loading providers</option>';
@@ -259,16 +265,25 @@
 
         // Reset
         runCount = 0;
-        // Reset charts (per-run visualization)
         resetChart(ttfbChart);
         resetChart(tpsChart);
+
+        // Show live output panel and reset it
+        const liveCard = $('#live-output-card');
+        liveCard.classList.remove('hidden');
+        $('#live-output-body').textContent = '';
+        $('#live-output-meta').textContent = '';
+        $('#ticker-badge').textContent = '⏱ 0.0s';
+        $('#ticker-badge').className = 'ticker-badge';
+        $('#phase-badge').textContent = 'waiting';
+        $('#phase-badge').className = 'phase-badge phase-waiting';
 
         // Add separator if there are existing results
         const tbody = $('#results-tbody');
         if (tbody.children.length > 0) {
             const sep = document.createElement('tr');
             sep.className = 'run-separator';
-            sep.innerHTML = `<td colspan="10" style="text-align:center; padding:0.3rem; font-size:0.7rem; color:var(--text-muted); border-bottom:1px solid var(--border-subtle); letter-spacing:0.05em;">── New Run ──</td>`;
+            sep.innerHTML = `<td colspan="12" style="text-align:center; padding:0.3rem; font-size:0.7rem; color:var(--text-muted); border-bottom:1px solid var(--border-subtle); letter-spacing:0.05em;">── New Run ──</td>`;
             tbody.appendChild(sep);
         }
         resetStats();
@@ -330,6 +345,8 @@
             await streamBenchmark(endpoint, body, {
                 onRunMetric: handleRunMetric,
                 onComplete: handleSuiteComplete,
+                onTick: handleTick,
+                onTokenChunk: handleTokenChunk,
             });
         } catch (e) {
             console.error('Benchmark error:', e);
@@ -347,6 +364,38 @@
     }
 
     // ===== SSE Event Handlers =====
+
+    function handleTick(data) {
+        const badge = $('#ticker-badge');
+        badge.textContent = `⏱ ${data.elapsed_seconds.toFixed(1)}s`;
+
+        const phaseBadge = $('#phase-badge');
+        if (data.phase === 'streaming') {
+            phaseBadge.textContent = 'streaming';
+            phaseBadge.className = 'phase-badge phase-streaming';
+            badge.className = 'ticker-badge ticker-streaming';
+        } else {
+            phaseBadge.textContent = 'waiting';
+            phaseBadge.className = 'phase-badge phase-waiting';
+            badge.className = 'ticker-badge';
+        }
+    }
+
+    function handleTokenChunk(data) {
+        const body = $('#live-output-body');
+        // Append text as a span for typewriter effect
+        const span = document.createElement('span');
+        span.textContent = data.text;
+        span.className = 'chunk-token';
+        body.appendChild(span);
+        // Auto-scroll
+        body.scrollTop = body.scrollHeight;
+
+        // Update meta
+        $('#live-output-meta').textContent =
+            `${data.cumulative_chars} chars · ${data.cumulative_words} words · chunk #${data.chunk_index}`;
+    }
+
     function handleRunMetric(data) {
         runCount++;
         addResultRow(data);
@@ -360,6 +409,12 @@
 
         if (totalExpectedRuns > 1) {
             updateProgress(runCount, totalExpectedRuns);
+        }
+
+        // Update live output meta with final stats
+        if (data.inter_chunk_ms_avg) {
+            $('#live-output-meta').textContent +=
+                ` · chunk avg ${data.inter_chunk_ms_avg.toFixed(1)}ms`;
         }
     }
 
@@ -380,11 +435,17 @@
         $('#stat-success').textContent = successRate;
 
         // Animate stats
-        $$('.stat-card').forEach((card, i) => {
+        $$('.stat-card').forEach((card) => {
             card.classList.remove('fade-in');
             void card.offsetWidth; // Reflow
             card.classList.add('fade-in');
         });
+
+        // Update ticker to done
+        $('#ticker-badge').textContent = '✓ done';
+        $('#ticker-badge').className = 'ticker-badge ticker-done';
+        $('#phase-badge').textContent = 'complete';
+        $('#phase-badge').className = 'phase-badge phase-done';
     }
 
     // ===== Results Table =====
@@ -396,6 +457,9 @@
         const statusClass = data.status === 'success' ? 'status-success' : 'status-error';
         const statusIcon = data.status === 'success' ? '✓' : '✗';
 
+        const chunkAvg = data.inter_chunk_ms_avg != null ? data.inter_chunk_ms_avg.toFixed(1) : '—';
+        const words = data.total_words != null ? data.total_words : '—';
+
         tr.innerHTML = `
             <td>${data.run_number}</td>
             <td>${data.provider_id}</td>
@@ -406,6 +470,8 @@
             <td>${data.tokens_per_second != null ? data.tokens_per_second.toFixed(1) : '—'}</td>
             <td>${data.input_tokens ?? '—'}</td>
             <td>${data.output_tokens ?? '—'}</td>
+            <td>${chunkAvg}</td>
+            <td>${words}</td>
             <td><button class="btn btn-sm btn-danger row-del" title="Remove" style="padding:0.1rem 0.35rem; font-size:0.65rem; line-height:1;">✕</button></td>
         `;
         tr.querySelector('.row-del').addEventListener('click', () => tr.remove());
@@ -430,7 +496,7 @@
     function showError(message) {
         const tbody = $('#results-tbody');
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td colspan="10" style="color: var(--accent-danger); text-align: center; font-family: var(--font-sans);">⚠ Error: ${message}</td>`;
+        tr.innerHTML = `<td colspan="12" style="color: var(--accent-danger); text-align: center; font-family: var(--font-sans);">⚠ Error: ${message}</td>`;
         tbody.appendChild(tr);
     }
 
@@ -484,7 +550,6 @@
                 tr.className = 'fade-in';
 
                 const date = new Date(s.created_at).toLocaleString();
-                const statusClass = s.status === 'completed' ? 'status-success' : 'status-error';
 
                 tr.innerHTML = `
                     <td style="font-family: var(--font-sans);">${date}</td>
@@ -552,6 +617,11 @@
                         <div class="stat-value">${detail.p95_ttfb_ms != null ? Math.round(detail.p95_ttfb_ms) : '—'}</div>
                         <div class="stat-unit">ms</div>
                     </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-label">Chunk Avg</div>
+                        <div class="stat-value">${detail.avg_inter_chunk_ms != null ? detail.avg_inter_chunk_ms.toFixed(1) : '—'}</div>
+                        <div class="stat-unit">ms</div>
+                    </div>
                 </div>
                 <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">
                     <strong>Prompt:</strong> ${escapeHtml(detail.prompt.substring(0, 200))}${detail.prompt.length > 200 ? '...' : ''}
@@ -562,6 +632,7 @@
                             <tr>
                                 <th>#</th><th>Provider</th><th>Model</th><th>Status</th>
                                 <th>TTFB</th><th>Latency</th><th>TPS</th><th>In</th><th>Out</th>
+                                <th>Chunk Avg</th><th>Words</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -580,6 +651,8 @@
                         <td>${r.tokens_per_second != null ? r.tokens_per_second.toFixed(1) : '—'}</td>
                         <td>${r.input_tokens ?? '—'}</td>
                         <td>${r.output_tokens ?? '—'}</td>
+                        <td>${r.inter_chunk_ms_avg != null ? r.inter_chunk_ms_avg.toFixed(1) : '—'}</td>
+                        <td>${r.total_words ?? '—'}</td>
                     </tr>
                 `;
             }
@@ -589,6 +662,188 @@
         } catch (e) {
             body.innerHTML = `<p style="color: var(--accent-danger);">Error loading details: ${e.message}</p>`;
         }
+    }
+
+    // ===== Speed Tests =====
+    function populateSpeedProviderSelects() {
+        const selects = [
+            { prov: '#ping-provider-select', mod: '#ping-model-select' },
+            { prov: '#stress-provider-select', mod: '#stress-model-select' },
+            { prov: '#cold-provider-select', mod: '#cold-model-select' },
+        ];
+
+        for (const { prov, mod } of selects) {
+            const provSel = $(prov);
+            const modSel = $(mod);
+            if (!provSel) continue;
+
+            provSel.innerHTML = '';
+            for (const [pid, p] of Object.entries(providers)) {
+                const opt = document.createElement('option');
+                opt.value = pid;
+                opt.textContent = p.name;
+                provSel.appendChild(opt);
+            }
+
+            function updateMod() {
+                modSel.innerHTML = '';
+                const p = providers[provSel.value];
+                if (!p) return;
+                for (const m of p.models) {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.textContent = m;
+                    if (m === p.default_model) opt.selected = true;
+                    modSel.appendChild(opt);
+                }
+            }
+            provSel.addEventListener('change', updateMod);
+            updateMod();
+        }
+    }
+
+    function setupSpeedTests() {
+        // --- Ping ---
+        $('#run-ping-btn')?.addEventListener('click', async () => {
+            const btn = $('#run-ping-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Pinging...';
+
+            const providerId = $('#ping-provider-select').value;
+            const model = $('#ping-model-select').value;
+
+            try {
+                const result = await pingProvider({ provider_id: providerId, model });
+                const resultEl = $('#ping-result');
+                resultEl.classList.remove('hidden');
+
+                $('#ping-ttfb').textContent = result.ttfb_ms != null ? result.ttfb_ms.toFixed(1) : '—';
+                $('#ping-rtt').textContent = result.round_trip_ms != null ? result.round_trip_ms.toFixed(1) : '—';
+
+                const healthEl = $('#ping-health');
+                healthEl.textContent = result.health;
+                healthEl.className = 'ping-value health-' + result.health;
+            } catch (e) {
+                alert('Ping failed: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="send" class="icon-btn"></i> Run Ping';
+                lucide.createIcons();
+            }
+        });
+
+        // --- Stress Test ---
+        $('#run-stress-btn')?.addEventListener('click', async () => {
+            const btn = $('#run-stress-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Running Stress Test...';
+
+            const providerId = $('#stress-provider-select').value;
+            const model = $('#stress-model-select').value;
+            const prompt = $('#stress-prompt').value;
+            const maxTokens = parseInt($('#stress-max-tokens').value);
+            const levelsRaw = $('#stress-levels').value;
+            const concurrencyLevels = levelsRaw.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+            const runsPerLevel = parseInt($('#stress-runs').value);
+
+            const tbody = $('#stress-tbody');
+            tbody.innerHTML = '';
+            $('#stress-results').classList.remove('hidden');
+            $('#stress-summary').textContent = '';
+
+            try {
+                await streamBenchmark('stress', {
+                    provider_id: providerId, model, prompt,
+                    max_tokens: maxTokens,
+                    concurrency_levels: concurrencyLevels,
+                    runs_per_level: runsPerLevel,
+                }, {
+                    onStressLevel: (data) => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'fade-in';
+                        tr.innerHTML = `
+                            <td>${data.concurrency}</td>
+                            <td>${data.avg_tps != null ? data.avg_tps.toFixed(2) : '—'}</td>
+                            <td>${data.avg_latency_ms != null ? Math.round(data.avg_latency_ms) : '—'}</td>
+                            <td>${(data.error_rate * 100).toFixed(1)}%</td>
+                            <td>${data.successful_runs}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    },
+                    onStressComplete: (data) => {
+                        if (data.peak_tps != null) {
+                            $('#stress-summary').innerHTML = `
+                                <div class="speed-summary-box">
+                                    🏆 Peak TPS: <strong>${data.peak_tps.toFixed(2)}</strong>
+                                    at concurrency <strong>${data.peak_tps_concurrency}</strong>
+                                </div>
+                            `;
+                        }
+                    },
+                });
+            } catch (e) {
+                alert('Stress test failed: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="zap" class="icon-btn"></i> Run Stress Test';
+                lucide.createIcons();
+            }
+        });
+
+        // --- Cold-Start Probe ---
+        $('#run-cold-btn')?.addEventListener('click', async () => {
+            const btn = $('#run-cold-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Running Cold-Start Probe...';
+
+            const providerId = $('#cold-provider-select').value;
+            const model = $('#cold-model-select').value;
+            const numProbes = parseInt($('#cold-probes').value);
+            const gapSeconds = parseInt($('#cold-gap').value);
+
+            const tbody = $('#cold-tbody');
+            tbody.innerHTML = '';
+            $('#cold-results').classList.remove('hidden');
+            $('#cold-summary').textContent = '';
+
+            try {
+                await streamBenchmark('cold-start', {
+                    provider_id: providerId, model,
+                    num_cold_probes: numProbes,
+                    gap_seconds: gapSeconds,
+                }, {
+                    onColdProbe: (data) => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'fade-in';
+                        const typeClass = data.probe_type === 'cold' ? 'status-error' : 'status-success';
+                        tr.innerHTML = `
+                            <td>${data.probe_number}</td>
+                            <td><span class="status-badge ${typeClass}">${data.probe_type}</span></td>
+                            <td>${data.ttfb_ms != null ? data.ttfb_ms.toFixed(1) : '—'}</td>
+                            <td>${data.total_latency_ms != null ? data.total_latency_ms.toFixed(1) : '—'}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    },
+                    onColdComplete: (data) => {
+                        if (data.avg_cold_ttfb_ms != null) {
+                            $('#cold-summary').innerHTML = `
+                                <div class="speed-summary-box">
+                                    ❄️ Cold TTFB: <strong>${data.avg_cold_ttfb_ms.toFixed(1)}ms</strong> ·
+                                    🔥 Warm TTFB: <strong>${data.avg_warm_ttfb_ms?.toFixed(1) ?? '—'}ms</strong> ·
+                                    Ratio: <strong>${data.cold_vs_warm_ratio?.toFixed(2) ?? '—'}×</strong>
+                                </div>
+                            `;
+                        }
+                    },
+                });
+            } catch (e) {
+                alert('Cold-start probe failed: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="snowflake" class="icon-btn"></i> Run Cold-Start Probe';
+                lucide.createIcons();
+            }
+        });
     }
 
     function escapeHtml(str) {

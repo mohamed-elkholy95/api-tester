@@ -821,3 +821,198 @@ tbody tr:hover {
     background: rgba(239, 68, 68, 0.1);
     border-color: var(--accent-danger);
 }
+
+/* ===== Live Output Monitor ===== */
+.live-output-card {
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.live-output-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.6rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.live-output-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.live-output-meta {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+.live-output-body {
+    min-height: 80px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    line-height: 1.55;
+    color: var(--text-primary);
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.8rem;
+    word-break: break-word;
+    white-space: pre-wrap;
+}
+
+.chunk-token {
+    animation: fadeIn 0.08s ease forwards;
+}
+
+/* Ticker badge */
+.ticker-badge {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: rgba(99, 102, 241, 0.12);
+    color: var(--accent-primary);
+    transition: background var(--transition), color var(--transition);
+}
+
+.ticker-badge.ticker-streaming {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--accent-success);
+    animation: pulse 1s ease-in-out infinite;
+}
+
+.ticker-badge.ticker-done {
+    background: rgba(16, 185, 129, 0.12);
+    color: var(--accent-success);
+}
+
+/* Phase badge */
+.phase-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 7px;
+    border-radius: 20px;
+}
+
+.phase-waiting {
+    background: rgba(245, 158, 11, 0.12);
+    color: var(--accent-warning);
+}
+
+.phase-streaming {
+    background: rgba(16, 185, 129, 0.12);
+    color: var(--accent-success);
+}
+
+.phase-done {
+    background: rgba(99, 102, 241, 0.12);
+    color: var(--accent-primary);
+}
+
+/* ===== Speed Tests View ===== */
+.speed-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.speed-card {
+    padding: 1.5rem;
+}
+
+.speed-card h2 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.speed-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+}
+
+/* Ping metrics */
+.ping-result {
+    margin-top: 1rem;
+}
+
+.ping-metrics {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.ping-metric {
+    text-align: center;
+    min-width: 100px;
+}
+
+.ping-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 0.25rem;
+}
+
+.ping-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+}
+
+.ping-unit {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+/* Health status colors */
+.health-ok {
+    color: var(--accent-success);
+}
+
+.health-slow {
+    color: var(--accent-warning);
+}
+
+.health-degraded {
+    color: var(--accent-danger);
+}
+
+.health-error {
+    color: var(--accent-danger);
+}
+
+/* Stress / Cold summary box */
+.speed-summary-box {
+    margin-top: 0.75rem;
+    padding: 0.7rem 1rem;
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.speed-summary-box strong {
+    color: var(--text-primary);
+}
+
+/* Stress / Cold results */
+.stress-results,
+.cold-results {
+    margin-top: 0.5rem;
+}

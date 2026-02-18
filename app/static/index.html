@@ -18,7 +18,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/css/style.css?v=7">
+    <link rel="stylesheet" href="/css/style.css?v=8">
 </head>
 
 <body>
@@ -36,6 +36,9 @@
                 </button>
                 <button class="nav-btn" data-view="history" id="nav-history">
                     <i data-lucide="bar-chart-3" class="icon-nav"></i> History
+                </button>
+                <button class="nav-btn" data-view="speed" id="nav-speed">
+                    <i data-lucide="rocket" class="icon-nav"></i> Speed Tests
                 </button>
             </nav>
         </div>
@@ -173,6 +176,20 @@
                     </div>
                 </div>
 
+                <!-- Live Output Monitor -->
+                <div class="live-output-card glass-card hidden" id="live-output-card">
+                    <div class="live-output-header">
+                        <div class="live-output-title">
+                            <i data-lucide="radio" class="icon-section-sm"></i>
+                            <span>Live Output</span>
+                            <span class="ticker-badge" id="ticker-badge">⏱ 0.0s</span>
+                            <span class="phase-badge" id="phase-badge">waiting</span>
+                        </div>
+                        <div class="live-output-meta" id="live-output-meta"></div>
+                    </div>
+                    <div class="live-output-body" id="live-output-body"></div>
+                </div>
+
                 <!-- Results Table -->
                 <div class="table-card glass-card">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
@@ -193,8 +210,10 @@
                                     <th>TTFB (ms)</th>
                                     <th>Latency (ms)</th>
                                     <th>TPS</th>
-                                    <th>In Tokens</th>
-                                    <th>Out Tokens</th>
+                                    <th>In Tok</th>
+                                    <th>Out Tok</th>
+                                    <th>Chunk Avg</th>
+                                    <th>Words</th>
                                     <th></th>
                                 </tr>
                             </thead>
@@ -268,11 +287,163 @@
                 </div>
             </div>
         </div>
+
+        <!-- Speed Tests View -->
+        <div id="speed-view" class="view">
+            <section class="speed-section">
+                <!-- Ping / Health Check -->
+                <div class="speed-card glass-card">
+                    <h2><i data-lucide="activity" class="icon-section"></i> API Health Check (Ping)</h2>
+                    <p class="speed-desc">Send a minimal 1-token request to measure TTFB and classify API
+                        responsiveness.</p>
+                    <div class="form-row" style="margin-top:1rem;">
+                        <div class="form-group">
+                            <label>Provider</label>
+                            <select id="ping-provider-select">
+                                <option value="">Loading...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Model</label>
+                            <select id="ping-model-select">
+                                <option value="">Select provider</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="run-ping-btn" style="margin-top:0.75rem;">
+                        <i data-lucide="send" class="icon-btn"></i> Run Ping
+                    </button>
+                    <div class="ping-result hidden" id="ping-result">
+                        <div class="ping-metrics">
+                            <div class="ping-metric">
+                                <div class="ping-label">TTFB</div>
+                                <div class="ping-value" id="ping-ttfb">—</div>
+                                <div class="ping-unit">ms</div>
+                            </div>
+                            <div class="ping-metric">
+                                <div class="ping-label">Round Trip</div>
+                                <div class="ping-value" id="ping-rtt">—</div>
+                                <div class="ping-unit">ms</div>
+                            </div>
+                            <div class="ping-metric">
+                                <div class="ping-label">Health</div>
+                                <div class="ping-value" id="ping-health">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stress Test -->
+                <div class="speed-card glass-card">
+                    <h2><i data-lucide="trending-up" class="icon-section"></i> Throughput Stress Test</h2>
+                    <p class="speed-desc">Ramp concurrency levels to find the provider's TPS ceiling and latency
+                        degradation.</p>
+                    <div class="form-row" style="margin-top:1rem;">
+                        <div class="form-group">
+                            <label>Provider</label>
+                            <select id="stress-provider-select">
+                                <option value="">Loading...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Model</label>
+                            <select id="stress-model-select">
+                                <option value="">Select provider</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Prompt</label>
+                            <input type="text" id="stress-prompt" value="Explain quantum computing briefly.">
+                        </div>
+                        <div class="form-group">
+                            <label>Max Tokens</label>
+                            <input type="number" id="stress-max-tokens" value="128" min="1" max="512">
+                        </div>
+                        <div class="form-group">
+                            <label>Concurrency Levels (comma-sep)</label>
+                            <input type="text" id="stress-levels" value="1,2,5,10">
+                        </div>
+                        <div class="form-group">
+                            <label>Runs per Level</label>
+                            <input type="number" id="stress-runs" value="3" min="1" max="10">
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="run-stress-btn" style="margin-top:0.75rem;">
+                        <i data-lucide="zap" class="icon-btn"></i> Run Stress Test
+                    </button>
+                    <div class="stress-results hidden" id="stress-results">
+                        <div class="table-wrapper" style="margin-top:1rem;">
+                            <table id="stress-table">
+                                <thead>
+                                    <tr>
+                                        <th>Concurrency</th>
+                                        <th>Avg TPS</th>
+                                        <th>Avg Latency (ms)</th>
+                                        <th>Error Rate</th>
+                                        <th>Successful Runs</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="stress-tbody"></tbody>
+                            </table>
+                        </div>
+                        <div class="stress-summary" id="stress-summary"></div>
+                    </div>
+                </div>
+
+                <!-- Cold-Start Probe -->
+                <div class="speed-card glass-card">
+                    <h2><i data-lucide="thermometer-snowflake" class="icon-section"></i> Cold-Start Probe</h2>
+                    <p class="speed-desc">Measure TTFB after intentional idle gaps (cold) vs immediate follow-up
+                        requests (warm).</p>
+                    <div class="form-row" style="margin-top:1rem;">
+                        <div class="form-group">
+                            <label>Provider</label>
+                            <select id="cold-provider-select">
+                                <option value="">Loading...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Model</label>
+                            <select id="cold-model-select">
+                                <option value="">Select provider</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Cold Probes</label>
+                            <input type="number" id="cold-probes" value="2" min="1" max="5">
+                        </div>
+                        <div class="form-group">
+                            <label>Gap (seconds)</label>
+                            <input type="number" id="cold-gap" value="30" min="5" max="120">
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="run-cold-btn" style="margin-top:0.75rem;">
+                        <i data-lucide="snowflake" class="icon-btn"></i> Run Cold-Start Probe
+                    </button>
+                    <div class="cold-results hidden" id="cold-results">
+                        <div class="table-wrapper" style="margin-top:1rem;">
+                            <table id="cold-table">
+                                <thead>
+                                    <tr>
+                                        <th>Probe #</th>
+                                        <th>Type</th>
+                                        <th>TTFB (ms)</th>
+                                        <th>Latency (ms)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cold-tbody"></tbody>
+                            </table>
+                        </div>
+                        <div class="cold-summary" id="cold-summary"></div>
+                    </div>
+                </div>
+            </section>
+        </div>
     </main>
 
-    <script src="/js/api.js?v=7"></script>
-    <script src="/js/charts.js?v=7"></script>
-    <script src="/js/app.js?v=7"></script>
+    <script src="/js/api.js?v=8"></script>
+    <script src="/js/charts.js?v=8"></script>
+    <script src="/js/app.js?v=8"></script>
     <script>
         // Initialize Lucide icons after DOM load
         document.addEventListener('DOMContentLoaded', () => {
