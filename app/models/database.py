@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy import text
 from contextlib import asynccontextmanager
 from app.core.config import settings
 import os
@@ -17,6 +18,25 @@ async def init_db():
     from app.models.tables import Base
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await migrate_db()
+
+
+async def migrate_db():
+    """Add new columns to existing tables if they don't exist (idempotent)."""
+    new_columns = [
+        ("benchmark_runs", "inter_chunk_ms_avg", "FLOAT"),
+        ("benchmark_runs", "inter_chunk_ms_p95", "FLOAT"),
+        ("benchmark_runs", "total_chars", "INTEGER"),
+        ("benchmark_runs", "total_words", "INTEGER"),
+        ("benchmark_suites", "avg_inter_chunk_ms", "FLOAT"),
+        ("benchmark_suites", "avg_total_chars", "FLOAT"),
+    ]
+    async with engine.begin() as conn:
+        for table, col, col_type in new_columns:
+            try:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+            except Exception:
+                pass  # Column already exists — safe to ignore
 
 
 async def close_db():

@@ -19,7 +19,7 @@ class BenchmarkSuite(Base):
     __tablename__ = "benchmark_suites"
 
     id = Column(String(36), primary_key=True)             # UUID
-    mode = Column(String(20), nullable=False)              # single|multi|concurrent|comparison
+    mode = Column(String(20), nullable=False)              # single|multi|concurrent|comparison|stress|cold_start
     provider_id = Column(String(50), nullable=False)       # "glm", "kimi", etc. or "multi"
     model = Column(String(100), nullable=False)
     prompt = Column(Text, nullable=False)
@@ -41,6 +41,9 @@ class BenchmarkSuite(Base):
     total_input_tokens = Column(Integer, nullable=True)
     total_output_tokens = Column(Integer, nullable=True)
     error_count = Column(Integer, default=0)
+    # New: output monitor aggregates
+    avg_inter_chunk_ms = Column(Float, nullable=True)
+    avg_total_chars = Column(Float, nullable=True)
 
     runs = relationship("BenchmarkRun", back_populates="suite", cascade="all, delete-orphan")
 
@@ -70,5 +73,11 @@ class BenchmarkRun(Base):
     # Response
     response_preview = Column(String(500), nullable=True)  # First 500 chars
     recorded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # New: output monitor metrics
+    inter_chunk_ms_avg = Column(Float, nullable=True)      # Avg gap between chunks
+    inter_chunk_ms_p95 = Column(Float, nullable=True)      # P95 chunk gap (jitter)
+    total_chars = Column(Integer, nullable=True)
+    total_words = Column(Integer, nullable=True)
 
     suite = relationship("BenchmarkSuite", back_populates="runs")

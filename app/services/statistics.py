@@ -2,7 +2,7 @@ import statistics
 
 
 def compute_percentile(values: list[float], pct: float) -> float | None:
-    """Compute percentile (0-100) from sorted values."""
+    """Compute percentile (0-100) from a list of values."""
     if not values:
         return None
     sorted_v = sorted(values)
@@ -26,7 +26,11 @@ def compute_suite_stats(runs: list[dict]) -> dict:
     in_tokens = sum(r.get("input_tokens", 0) for r in successful)
     out_tokens = sum(r.get("output_tokens", 0) for r in successful)
 
-    return {
+    # New: inter-chunk and output stats
+    inter_chunk_avgs = [r["inter_chunk_ms_avg"] for r in successful if r.get("inter_chunk_ms_avg")]
+    total_chars_vals = [r["total_chars"] for r in successful if r.get("total_chars")]
+
+    result = {
         "avg_ttfb_ms": round(statistics.mean(ttfbs), 2) if ttfbs else None,
         "avg_tps": round(statistics.mean(tps_vals), 2) if tps_vals else None,
         "avg_latency_ms": round(statistics.mean(latencies), 2) if latencies else None,
@@ -36,4 +40,22 @@ def compute_suite_stats(runs: list[dict]) -> dict:
         "total_input_tokens": in_tokens,
         "total_output_tokens": out_tokens,
         "error_count": len(runs) - len(successful),
+        # New fields
+        "avg_inter_chunk_ms": round(statistics.mean(inter_chunk_avgs), 3) if inter_chunk_avgs else None,
+        "avg_total_chars": round(statistics.mean(total_chars_vals), 1) if total_chars_vals else None,
+    }
+    return result
+
+
+def compute_inter_chunk_stats(chunk_timings_ms: list[float]) -> dict:
+    """Compute avg and P95 inter-chunk gap from per-chunk elapsed timestamps (ms)."""
+    if len(chunk_timings_ms) < 2:
+        return {"inter_chunk_ms_avg": None, "inter_chunk_ms_p95": None}
+    gaps = [
+        chunk_timings_ms[i] - chunk_timings_ms[i - 1]
+        for i in range(1, len(chunk_timings_ms))
+    ]
+    return {
+        "inter_chunk_ms_avg": round(statistics.mean(gaps), 3),
+        "inter_chunk_ms_p95": round(compute_percentile(gaps, 95), 3),
     }
