@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# Secrets & env
+.env
+.env.*
+!.env.example
+
+# Data & DB
+data/
+*.db
+*.sqlite
+
+# Dev & CI
+.git/
+.github/
+tests/
+docs/
+PLAN.md
+README.md
+
+# Editor
+.vscode/
+.idea/
+*.swp
