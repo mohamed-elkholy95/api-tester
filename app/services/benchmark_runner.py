@@ -3,12 +3,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import AsyncGenerator
 
-from app.core.config import settings, ProviderConfig
+from app.core.config import settings
 from app.services.llm_client import LLMClient, RunResult
 from app.services.statistics import compute_suite_stats
 from app.models.database import get_db
 from app.models.tables import BenchmarkSuite, BenchmarkRun, SuiteStatus
-from app.schemas.benchmark import RunMetricEvent, SuiteCompleteEvent
+from app.schemas.benchmark import (
+    RunMetricEvent, SuiteCompleteEvent, TickEvent, TokenChunkEvent,
+)
 
 
 class BenchmarkRunner:
@@ -25,13 +27,55 @@ class BenchmarkRunner:
     async def run_single(
         self, provider_id: str, model: str, prompt: str,
         max_tokens: int, temperature: float,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict, None]:
         """Single run benchmark, yielding SSE events."""
         suite_id = str(uuid.uuid4())
+        run_number = 1
         client = self._get_client(provider_id)
+        sse_queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+        async def tick_cb(elapsed: float, phase: str):
+            ev = TickEvent(suite_id=suite_id, run_number=run_number,
+                           elapsed_seconds=elapsed, phase=phase)
+            await sse_queue.put({"event": "tick", "data": ev.model_dump_json()})
+
+        cumulative_chars = 0
+        cumulative_words = 0
+
+        async def chunk_cb(idx: int, text: str, elapsed_ms: float, inter_ms: float):
+            nonlocal cumulative_chars, cumulative_words
+            cumulative_chars += len(text)
+            cumulative_words += len(text.split())
+            ev = TokenChunkEvent(
+                suite_id=suite_id, run_number=run_number,
+                chunk_index=idx, text=text,
+                elapsed_ms=elapsed_ms, inter_chunk_ms=inter_ms,
+                cumulative_chars=cumulative_chars,
+                cumulative_words=cumulative_words,
+            )
+            await sse_queue.put({"event": "token_chunk", "data": ev.model_dump_json()})
+
+        result_holder: list[RunResult] = []
+
+        async def _run():
+            r = await client.benchmark_streaming(
+                model, prompt, max_tokens, temperature,
+                tick_callback=tick_cb, chunk_callback=chunk_cb,
+            )
+            result_holder.append(r)
+            await sse_queue.put(None)  # sentinel
+
+        runner_task = asyncio.create_task(_run())
 
         try:
-            result = await client.benchmark_streaming(model, prompt, max_tokens, temperature)
+            while True:
+                item = await sse_queue.get()
+                if item is None:
+                    break
+                yield item
+
+            await runner_task
+            result = result_holder[0]
 
             event = RunMetricEvent(
                 suite_id=suite_id, run_number=1,
@@ -43,6 +87,10 @@ class BenchmarkRunner:
                 output_tokens=result.output_tokens,
                 response_preview=result.response_text[:500],
                 error_message=result.error_message,
+                inter_chunk_ms_avg=result.inter_chunk_ms_avg or None,
+                inter_chunk_ms_p95=result.inter_chunk_ms_p95 or None,
+                total_chars=result.total_chars or None,
+                total_words=result.total_words or None,
             )
             yield {"event": "run_metric", "data": event.model_dump_json()}
 
@@ -64,18 +112,61 @@ class BenchmarkRunner:
     async def run_multi(
         self, provider_id: str, model: str, prompt: str,
         num_runs: int, max_tokens: int, temperature: float,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict, None]:
         suite_id = str(uuid.uuid4())
         client = self._get_client(provider_id)
         results: list[RunResult] = []
 
         try:
             for i in range(num_runs):
-                result = await client.benchmark_streaming(model, prompt, max_tokens, temperature)
+                run_number = i + 1
+                sse_queue: asyncio.Queue[dict | None] = asyncio.Queue()
+                cumulative_chars = 0
+                cumulative_words = 0
+
+                async def tick_cb(elapsed: float, phase: str, _rn=run_number, _q=sse_queue):
+                    ev = TickEvent(suite_id=suite_id, run_number=_rn,
+                                   elapsed_seconds=elapsed, phase=phase)
+                    await _q.put({"event": "tick", "data": ev.model_dump_json()})
+
+                async def chunk_cb(idx: int, text: str, elapsed_ms: float, inter_ms: float,
+                                   _rn=run_number, _q=sse_queue):
+                    nonlocal cumulative_chars, cumulative_words
+                    cumulative_chars += len(text)
+                    cumulative_words += len(text.split())
+                    ev = TokenChunkEvent(
+                        suite_id=suite_id, run_number=_rn,
+                        chunk_index=idx, text=text,
+                        elapsed_ms=elapsed_ms, inter_chunk_ms=inter_ms,
+                        cumulative_chars=cumulative_chars,
+                        cumulative_words=cumulative_words,
+                    )
+                    await _q.put({"event": "token_chunk", "data": ev.model_dump_json()})
+
+                result_holder: list[RunResult] = []
+
+                async def _run(_q=sse_queue):
+                    r = await client.benchmark_streaming(
+                        model, prompt, max_tokens, temperature,
+                        tick_callback=tick_cb, chunk_callback=chunk_cb,
+                    )
+                    result_holder.append(r)
+                    await _q.put(None)
+
+                runner_task = asyncio.create_task(_run())
+
+                while True:
+                    item = await sse_queue.get()
+                    if item is None:
+                        break
+                    yield item
+
+                await runner_task
+                result = result_holder[0]
                 results.append(result)
 
                 event = RunMetricEvent(
-                    suite_id=suite_id, run_number=i + 1,
+                    suite_id=suite_id, run_number=run_number,
                     provider_id=provider_id, model=model,
                     status=result.status, ttfb_ms=result.ttfb_ms,
                     total_latency_ms=result.total_latency_ms,
@@ -84,6 +175,10 @@ class BenchmarkRunner:
                     output_tokens=result.output_tokens,
                     response_preview=result.response_text[:500],
                     error_message=result.error_message,
+                    inter_chunk_ms_avg=result.inter_chunk_ms_avg or None,
+                    inter_chunk_ms_p95=result.inter_chunk_ms_p95 or None,
+                    total_chars=result.total_chars or None,
+                    total_words=result.total_words or None,
                 )
                 yield {"event": "run_metric", "data": event.model_dump_json()}
 
@@ -106,17 +201,41 @@ class BenchmarkRunner:
     async def run_concurrent(
         self, provider_id: str, model: str, prompt: str,
         num_runs: int, concurrency: int, max_tokens: int, temperature: float,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict, None]:
         """Fire num_runs requests with max `concurrency` in flight at once."""
         suite_id = str(uuid.uuid4())
         client = self._get_client(provider_id)
         semaphore = asyncio.Semaphore(concurrency)
-        queue: asyncio.Queue[RunMetricEvent | None] = asyncio.Queue()
+        queue: asyncio.Queue[dict | None] = asyncio.Queue()
         results: list[RunResult] = []
 
         async def _worker(run_num: int):
             async with semaphore:
-                result = await client.benchmark_streaming(model, prompt, max_tokens, temperature)
+                cumulative_chars = 0
+                cumulative_words = 0
+
+                async def tick_cb(elapsed: float, phase: str):
+                    ev = TickEvent(suite_id=suite_id, run_number=run_num,
+                                   elapsed_seconds=elapsed, phase=phase)
+                    await queue.put({"event": "tick", "data": ev.model_dump_json()})
+
+                async def chunk_cb(idx: int, text: str, elapsed_ms: float, inter_ms: float):
+                    nonlocal cumulative_chars, cumulative_words
+                    cumulative_chars += len(text)
+                    cumulative_words += len(text.split())
+                    ev = TokenChunkEvent(
+                        suite_id=suite_id, run_number=run_num,
+                        chunk_index=idx, text=text,
+                        elapsed_ms=elapsed_ms, inter_chunk_ms=inter_ms,
+                        cumulative_chars=cumulative_chars,
+                        cumulative_words=cumulative_words,
+                    )
+                    await queue.put({"event": "token_chunk", "data": ev.model_dump_json()})
+
+                result = await client.benchmark_streaming(
+                    model, prompt, max_tokens, temperature,
+                    tick_callback=tick_cb, chunk_callback=chunk_cb,
+                )
                 results.append(result)
                 event = RunMetricEvent(
                     suite_id=suite_id, run_number=run_num,
@@ -128,24 +247,26 @@ class BenchmarkRunner:
                     output_tokens=result.output_tokens,
                     response_preview=result.response_text[:500],
                     error_message=result.error_message,
+                    inter_chunk_ms_avg=result.inter_chunk_ms_avg or None,
+                    inter_chunk_ms_p95=result.inter_chunk_ms_p95 or None,
+                    total_chars=result.total_chars or None,
+                    total_words=result.total_words or None,
                 )
-                await queue.put(event)
+                await queue.put({"event": "run_metric", "data": event.model_dump_json()})
 
         async def _run_all():
             tasks = [asyncio.create_task(_worker(i + 1)) for i in range(num_runs)]
             await asyncio.gather(*tasks, return_exceptions=True)
-            await queue.put(None)  # Sentinel to signal completion
+            await queue.put(None)  # Sentinel
 
-        # Launch workers in background task
         runner_task = asyncio.create_task(_run_all())
 
         try:
-            # Yield SSE events as workers complete (real-time)
             while True:
-                event = await queue.get()
-                if event is None:
+                item = await queue.get()
+                if item is None:
                     break
-                yield {"event": "run_metric", "data": event.model_dump_json()}
+                yield item
 
             await runner_task
 
@@ -168,7 +289,7 @@ class BenchmarkRunner:
     async def run_comparison(
         self, providers_models: list[dict], prompt: str,
         num_runs: int, max_tokens: int, temperature: float,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict, None]:
         """Run same prompt across multiple providers for head-to-head comparison."""
         suite_id = str(uuid.uuid4())
         all_results: list[RunResult] = []
@@ -181,11 +302,14 @@ class BenchmarkRunner:
                 clients.append(client)
 
                 for i in range(num_runs):
-                    result = await client.benchmark_streaming(model, prompt, max_tokens, temperature)
+                    run_number = i + 1
+                    result = await client.benchmark_streaming(
+                        model, prompt, max_tokens, temperature,
+                    )
                     all_results.append(result)
 
                     event = RunMetricEvent(
-                        suite_id=suite_id, run_number=i + 1,
+                        suite_id=suite_id, run_number=run_number,
                         provider_id=pid, model=model,
                         status=result.status, ttfb_ms=result.ttfb_ms,
                         total_latency_ms=result.total_latency_ms,
@@ -194,6 +318,10 @@ class BenchmarkRunner:
                         output_tokens=result.output_tokens,
                         response_preview=result.response_text[:500],
                         error_message=result.error_message,
+                        inter_chunk_ms_avg=result.inter_chunk_ms_avg or None,
+                        inter_chunk_ms_p95=result.inter_chunk_ms_p95 or None,
+                        total_chars=result.total_chars or None,
+                        total_words=result.total_words or None,
                     )
                     yield {"event": "run_metric", "data": event.model_dump_json()}
 
@@ -238,6 +366,8 @@ class BenchmarkRunner:
             total_input_tokens=stats.get("total_input_tokens"),
             total_output_tokens=stats.get("total_output_tokens"),
             error_count=stats.get("error_count", 0),
+            avg_inter_chunk_ms=stats.get("avg_inter_chunk_ms"),
+            avg_total_chars=stats.get("avg_total_chars"),
         )
 
         runs = []
@@ -251,6 +381,10 @@ class BenchmarkRunner:
                 input_tokens=r.input_tokens, output_tokens=r.output_tokens,
                 total_tokens=r.total_tokens,
                 response_preview=r.response_text[:500] if r.response_text else None,
+                inter_chunk_ms_avg=r.inter_chunk_ms_avg or None,
+                inter_chunk_ms_p95=r.inter_chunk_ms_p95 or None,
+                total_chars=r.total_chars or None,
+                total_words=r.total_words or None,
             ))
 
         async with get_db() as session:
@@ -264,4 +398,6 @@ class BenchmarkRunner:
             "total_latency_ms": r.total_latency_ms,
             "tokens_per_second": r.tokens_per_second,
             "input_tokens": r.input_tokens, "output_tokens": r.output_tokens,
+            "inter_chunk_ms_avg": r.inter_chunk_ms_avg,
+            "total_chars": r.total_chars,
         }
