@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+data/
+.venv/
+*.db
+.gemini/
+.agent/
+*.egg-info/
+

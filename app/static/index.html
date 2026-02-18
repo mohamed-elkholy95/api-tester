@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM API Benchmark Tester</title>
+    <meta name="description"
+        content="Professional benchmarking tool for LLM APIs — measure latency, TTFB, tokens/sec across multiple providers in real-time.">
+    <!-- Favicon (inline SVG data URI — lightning bolt) -->
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23a855f7'/%3E%3Cstop offset='100%25' stop-color='%23ec4899'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='%230d0a1a'/%3E%3Cpath d='M18 4L8 18h6l-2 10 10-14h-6z' fill='url(%23g)'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/css/style.css?v=7">
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <div class="header-content">
+            <div class="logo">
+                <span class="logo-icon"><i data-lucide="zap" class="icon-logo"></i></span>
+                <h1>LLM Benchmark</h1>
+                <span class="version-badge">v0.1.0</span>
+            </div>
+            <nav class="main-nav">
+                <button class="nav-btn active" data-view="benchmark" id="nav-benchmark">
+                    <i data-lucide="flask-conical" class="icon-nav"></i> Benchmark
+                </button>
+                <button class="nav-btn" data-view="history" id="nav-history">
+                    <i data-lucide="bar-chart-3" class="icon-nav"></i> History
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="app-main">
+        <!-- Benchmark View -->
+        <div id="benchmark-view" class="view active">
+            <!-- Config Panel -->
+            <section class="config-panel glass-card">
+                <div class="config-header">
+                    <h2><i data-lucide="settings-2" class="icon-section"></i> Configuration</h2>
+                    <div class="mode-tabs">
+                        <button class="mode-tab active" data-mode="single" id="mode-single">Single</button>
+                        <button class="mode-tab" data-mode="multi" id="mode-multi">Multi-Run</button>
+                        <button class="mode-tab" data-mode="concurrent" id="mode-concurrent">Concurrent</button>
+                        <button class="mode-tab" data-mode="comparison" id="mode-comparison">Comparison</button>
+                    </div>
+                </div>
+
+                <form id="benchmark-form" class="config-form">
+                    <!-- Provider/Model Selection -->
+                    <div class="form-row" id="single-provider-row">
+                        <div class="form-group">
+                            <label for="provider-select"><i data-lucide="server" class="icon-label"></i>
+                                Provider</label>
+                            <select id="provider-select" required>
+                                <option value="">Loading providers...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="model-select"><i data-lucide="cpu" class="icon-label"></i> Model</label>
+                            <select id="model-select" required>
+                                <option value="">Select provider first</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Comparison: Multi-provider selection -->
+                    <div class="form-group hidden" id="comparison-providers-group">
+                        <label>Providers & Models</label>
+                        <div id="comparison-providers-list" class="comparison-list"></div>
+                        <button type="button" class="btn btn-sm btn-outline" id="add-comparison-provider">
+                            <i data-lucide="plus" class="icon-btn"></i> Add Provider
+                        </button>
+                    </div>
+
+                    <!-- Prompt -->
+                    <div class="form-group">
+                        <label for="prompt-input"><i data-lucide="message-square" class="icon-label"></i> Prompt</label>
+                        <textarea id="prompt-input" rows="3" placeholder="Enter your prompt here..."
+                            required>Explain the concept of quantum computing in simple terms.</textarea>
+                    </div>
+
+                    <!-- Parameters -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="max-tokens"><i data-lucide="hash" class="icon-label"></i> Max Tokens</label>
+                            <input type="number" id="max-tokens" value="512" min="1" max="4096">
+                        </div>
+                        <div class="form-group">
+                            <label for="temperature"><i data-lucide="thermometer" class="icon-label"></i>
+                                Temperature</label>
+                            <input type="number" id="temperature" value="0.7" min="0" max="2" step="0.1">
+                        </div>
+                        <div class="form-group hidden" id="num-runs-group">
+                            <label for="num-runs"><i data-lucide="repeat" class="icon-label"></i> Runs</label>
+                            <input type="number" id="num-runs" value="3" min="1" max="100">
+                        </div>
+                        <div class="form-group hidden" id="concurrency-group">
+                            <label for="concurrency"><i data-lucide="layers" class="icon-label"></i> Concurrency</label>
+                            <input type="number" id="concurrency" value="5" min="1" max="20">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-lg" id="run-benchmark-btn">
+                        <i data-lucide="play" class="icon-btn"></i> Run Benchmark
+                    </button>
+                </form>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section" id="results-section">
+                <!-- Stats Cards -->
+                <div class="stats-grid" id="stats-grid">
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon"><i data-lucide="timer" class="icon-stat"></i></div>
+                        <div class="stat-label">Avg TTFB</div>
+                        <div class="stat-value" id="stat-ttfb">—</div>
+                        <div class="stat-unit">ms</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon"><i data-lucide="gauge" class="icon-stat"></i></div>
+                        <div class="stat-label">Avg TPS</div>
+                        <div class="stat-value" id="stat-tps">—</div>
+                        <div class="stat-unit">tok/s</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon"><i data-lucide="clock" class="icon-stat"></i></div>
+                        <div class="stat-label">Avg Latency</div>
+                        <div class="stat-value" id="stat-latency">—</div>
+                        <div class="stat-unit">ms</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon"><i data-lucide="binary" class="icon-stat"></i></div>
+                        <div class="stat-label">Tokens</div>
+                        <div class="stat-value" id="stat-tokens">—</div>
+                        <div class="stat-unit">in / out</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon"><i data-lucide="check-circle-2" class="icon-stat"></i></div>
+                        <div class="stat-label">Success Rate</div>
+                        <div class="stat-value" id="stat-success">—</div>
+                        <div class="stat-unit">%</div>
+                    </div>
+                </div>
+
+                <!-- Progress -->
+                <div class="progress-bar-container hidden" id="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <span class="progress-text" id="progress-text">0 / 0 runs</span>
+                </div>
+
+                <!-- Charts -->
+                <div class="charts-grid">
+                    <div class="chart-card glass-card">
+                        <h3><i data-lucide="activity" class="icon-section-sm"></i> TTFB Over Runs</h3>
+                        <canvas id="ttfb-chart"></canvas>
+                    </div>
+                    <div class="chart-card glass-card">
+                        <h3><i data-lucide="trending-up" class="icon-section-sm"></i> Tokens/sec Over Runs</h3>
+                        <canvas id="tps-chart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Results Table -->
+                <div class="table-card glass-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                        <h3 style="margin:0;"><i data-lucide="table-2" class="icon-section-sm"></i> Run Results</h3>
+                        <button class="btn btn-sm btn-outline btn-danger-outline" id="clear-results-btn"
+                            title="Clear all results">
+                            <i data-lucide="trash-2" class="icon-btn-sm"></i> Clear All
+                        </button>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="results-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Provider</th>
+                                    <th>Model</th>
+                                    <th>Status</th>
+                                    <th>TTFB (ms)</th>
+                                    <th>Latency (ms)</th>
+                                    <th>TPS</th>
+                                    <th>In Tokens</th>
+                                    <th>Out Tokens</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="results-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- History View -->
+        <div id="history-view" class="view">
+            <section class="history-section">
+                <div class="history-header glass-card">
+                    <h2><i data-lucide="history" class="icon-section"></i> Benchmark History</h2>
+                    <div class="history-filters">
+                        <select id="history-mode-filter">
+                            <option value="">All Modes</option>
+                            <option value="single">Single</option>
+                            <option value="multi">Multi-Run</option>
+                            <option value="concurrent">Concurrent</option>
+                            <option value="comparison">Comparison</option>
+                        </select>
+                        <button class="btn btn-outline" id="refresh-history-btn">
+                            <i data-lucide="refresh-cw" class="icon-btn-sm"></i> Refresh
+                        </button>
+                        <button class="btn btn-sm btn-danger" id="clear-all-history-btn">
+                            <i data-lucide="trash-2" class="icon-btn-sm"></i> Clear All
+                        </button>
+                    </div>
+                </div>
+                <div class="table-card glass-card">
+                    <div class="table-wrapper">
+                        <table id="history-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Mode</th>
+                                    <th>Provider</th>
+                                    <th>Model</th>
+                                    <th>Runs</th>
+                                    <th>Avg TTFB</th>
+                                    <th>Avg TPS</th>
+                                    <th>Avg Latency</th>
+                                    <th>Errors</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-tbody">
+                                <tr>
+                                    <td colspan="10" class="empty-state">No benchmark history yet</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Suite Detail Modal -->
+            <div class="modal-overlay hidden" id="suite-detail-modal">
+                <div class="modal glass-card">
+                    <div class="modal-header">
+                        <h3>Suite Details</h3>
+                        <button class="btn btn-icon" id="close-modal-btn">
+                            <i data-lucide="x" class="icon-btn"></i>
+                        </button>
+                    </div>
+                    <div class="modal-body" id="suite-detail-body">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/js/api.js?v=7"></script>
+    <script src="/js/charts.js?v=7"></script>
+    <script src="/js/app.js?v=7"></script>
+    <script>
+        // Initialize Lucide icons after DOM load
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+        });
+    </script>
+</body>
+
+</html>
