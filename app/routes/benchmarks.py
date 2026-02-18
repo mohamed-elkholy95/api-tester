@@ -1,9 +1,11 @@
 from fastapi import APIRouter, HTTPException
 from sse_starlette.sse import EventSourceResponse
 from app.services.benchmark_runner import BenchmarkRunner
+from app.services.speed_tests import run_ping, run_stress, run_cold_start
 from app.schemas.benchmark import (
     SingleBenchmarkRequest, MultiBenchmarkRequest,
     ConcurrentBenchmarkRequest, ComparisonBenchmarkRequest,
+    PingRequest, StressTestRequest, ColdStartRequest,
 )
 
 router = APIRouter(prefix="/benchmarks", tags=["benchmarks"])
@@ -46,6 +48,30 @@ async def benchmark_comparison(req: ComparisonBenchmarkRequest):
         runner.run_comparison(req.providers, req.prompt,
                               req.num_runs, req.max_tokens, req.temperature)
     )
+
+
+# --- Speed Test Endpoints ---
+
+@router.post("/ping")
+async def benchmark_ping(req: PingRequest):
+    """Health check: minimal 1-token request to measure TTFB and classify API health."""
+    _validate_provider(req.provider_id)
+    result = await run_ping(req)
+    return result
+
+
+@router.post("/stress")
+async def benchmark_stress(req: StressTestRequest):
+    """Throughput stress test: ramp concurrency levels and measure TPS at each level."""
+    _validate_provider(req.provider_id)
+    return EventSourceResponse(run_stress(req))
+
+
+@router.post("/cold-start")
+async def benchmark_cold_start(req: ColdStartRequest):
+    """Cold-start probe: measure TTFB after idle gaps vs warm follow-up requests."""
+    _validate_provider(req.provider_id)
+    return EventSourceResponse(run_cold_start(req))
 
 
 def _validate_provider(provider_id: str):
