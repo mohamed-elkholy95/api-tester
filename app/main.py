@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.models.database import init_db, close_db
-from app.routes import create_api_router
+from app.api.v1.router import api_router
 
 
 @asynccontextmanager
@@ -30,7 +30,7 @@ app.add_middleware(
 )
 
 # API routes first (take priority over static mount)
-app.include_router(create_api_router())
+app.include_router(api_router, prefix="/api/v1")
 
 # Static files (dashboard) — mounted last as catch-all
 static_dir = Path(__file__).parent / "static"
