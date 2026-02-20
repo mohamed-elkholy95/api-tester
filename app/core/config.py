@@ -128,3 +128,43 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+async def get_db_providers() -> dict[str, ProviderConfig]:
+    """Load providers persisted via the Settings UI from SQLite.
+
+    Returns a dict of {provider_id: ProviderConfig}.  DB entries that share an
+    ID with an .env-based provider will override it in the merged provider map.
+    """
+    import json
+    from sqlalchemy import select
+    from app.models.api_settings import ProviderSetting
+    from app.models.database import get_db
+
+    result: dict[str, ProviderConfig] = {}
+    async with get_db() as db:
+        rows = (await db.execute(select(ProviderSetting))).scalars().all()
+
+    for row in rows:
+        try:
+            models = json.loads(row.models_json or "[]")
+        except Exception:
+            models = []
+        try:
+            extra_headers = json.loads(row.extra_headers_json or "{}")
+        except Exception:
+            extra_headers = {}
+
+        result[row.id] = ProviderConfig(
+            name=row.name,
+            base_url=row.base_url,
+            api_key=row.api_key or "",
+            models=models,
+            default_model=row.default_model or "",
+            supports_stream_usage=row.supports_stream_usage,
+            min_temperature=row.min_temperature,
+            extra_headers=extra_headers,
+        )
+
+    return result
+

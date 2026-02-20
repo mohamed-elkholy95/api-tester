@@ -6,8 +6,8 @@ from typing import AsyncGenerator
 from app.core.config import settings
 from app.services.llm_client import LLMClient, RunResult
 from app.services.statistics import compute_suite_stats
-from app.models.database import get_db
-from app.models.tables import BenchmarkSuite, BenchmarkRun, SuiteStatus
+from app.services.provider_service import ProviderService
+from app.repositories.benchmark_repo import BenchmarkRepository
 from app.schemas.benchmark import (
     RunMetricEvent, SuiteCompleteEvent, TickEvent, TokenChunkEvent,
 )
@@ -15,11 +15,13 @@ from app.schemas.benchmark import (
 
 class BenchmarkRunner:
 
-    def __init__(self):
-        self.providers = settings.get_providers()
+    def __init__(self, benchmark_repo: BenchmarkRepository, provider_service: ProviderService):
+        self.benchmark_repo = benchmark_repo
+        self.provider_service = provider_service
 
-    def _get_client(self, provider_id: str) -> LLMClient:
-        provider = self.providers[provider_id]
+    async def _get_client(self, provider_id: str) -> LLMClient:
+        providers = await self.provider_service.get_merged_providers()
+        provider = providers[provider_id]
         return LLMClient(provider_id, provider)
 
     # --- Single Run ---
@@ -31,7 +33,7 @@ class BenchmarkRunner:
         """Single run benchmark, yielding SSE events."""
         suite_id = str(uuid.uuid4())
         run_number = 1
-        client = self._get_client(provider_id)
+        client = await self._get_client(provider_id)
         sse_queue: asyncio.Queue[dict | None] = asyncio.Queue()
 
         async def tick_cb(elapsed: float, phase: str):
@@ -94,7 +96,7 @@ class BenchmarkRunner:
             )
             yield {"event": "run_metric", "data": event.model_dump_json()}
 
-            await self._persist_suite(suite_id, "single", provider_id, model,
+            await self.benchmark_repo.save_suite(suite_id, "single", provider_id, model,
                                        prompt, 1, 1, max_tokens, temperature, [result])
             stats = compute_suite_stats([self._result_to_dict(result)])
             complete = SuiteCompleteEvent(
@@ -114,7 +116,7 @@ class BenchmarkRunner:
         num_runs: int, max_tokens: int, temperature: float,
     ) -> AsyncGenerator[dict, None]:
         suite_id = str(uuid.uuid4())
-        client = self._get_client(provider_id)
+        client = await self._get_client(provider_id)
         results: list[RunResult] = []
 
         try:
@@ -182,7 +184,7 @@ class BenchmarkRunner:
                 )
                 yield {"event": "run_metric", "data": event.model_dump_json()}
 
-            await self._persist_suite(suite_id, "multi", provider_id, model,
+            await self.benchmark_repo.save_suite(suite_id, "multi", provider_id, model,
                                        prompt, num_runs, 1, max_tokens, temperature, results)
             stats = compute_suite_stats([self._result_to_dict(r) for r in results])
             complete = SuiteCompleteEvent(
@@ -204,7 +206,7 @@ class BenchmarkRunner:
     ) -> AsyncGenerator[dict, None]:
         """Fire num_runs requests with max `concurrency` in flight at once."""
         suite_id = str(uuid.uuid4())
-        client = self._get_client(provider_id)
+        client = await self._get_client(provider_id)
         semaphore = asyncio.Semaphore(concurrency)
         queue: asyncio.Queue[dict | None] = asyncio.Queue()
         results: list[RunResult] = []
@@ -270,7 +272,7 @@ class BenchmarkRunner:
 
             await runner_task
 
-            await self._persist_suite(suite_id, "concurrent", provider_id, model,
+            await self.benchmark_repo.save_suite(suite_id, "concurrent", provider_id, model,
                                        prompt, num_runs, concurrency, max_tokens, temperature, results)
             stats = compute_suite_stats([self._result_to_dict(r) for r in results])
             complete = SuiteCompleteEvent(
@@ -298,7 +300,7 @@ class BenchmarkRunner:
         try:
             for pm in providers_models:
                 pid, model = pm["provider_id"], pm["model"]
-                client = self._get_client(pid)
+                client = await self._get_client(pid)
                 clients.append(client)
 
                 for i in range(num_runs):
@@ -325,7 +327,7 @@ class BenchmarkRunner:
                     )
                     yield {"event": "run_metric", "data": event.model_dump_json()}
 
-            await self._persist_suite(suite_id, "comparison", "multi", "multi",
+            await self.benchmark_repo.save_suite(suite_id, "comparison", "multi", "multi",
                                        prompt, num_runs * len(providers_models),
                                        1, max_tokens, temperature, all_results)
             stats = compute_suite_stats([self._result_to_dict(r) for r in all_results])
@@ -341,55 +343,7 @@ class BenchmarkRunner:
             for c in clients:
                 await c.close()
 
-    # --- Persistence (SQLAlchemy) ---
 
-    async def _persist_suite(
-        self, suite_id: str, mode: str, provider_id: str, model: str,
-        prompt: str, num_runs: int, concurrency: int,
-        max_tokens: int, temperature: float, results: list[RunResult],
-    ):
-        """Save suite + all run results to SQLite via SQLAlchemy."""
-        stats = compute_suite_stats([self._result_to_dict(r) for r in results])
-
-        suite = BenchmarkSuite(
-            id=suite_id, mode=mode, provider_id=provider_id, model=model,
-            prompt=prompt, num_runs=num_runs, concurrency=concurrency,
-            max_tokens=max_tokens, temperature=temperature,
-            status=SuiteStatus.COMPLETED,
-            completed_at=datetime.now(timezone.utc),
-            avg_ttfb_ms=stats.get("avg_ttfb_ms"),
-            avg_tps=stats.get("avg_tps"),
-            avg_latency_ms=stats.get("avg_latency_ms"),
-            p50_ttfb_ms=stats.get("p50_ttfb_ms"),
-            p95_ttfb_ms=stats.get("p95_ttfb_ms"),
-            p99_ttfb_ms=stats.get("p99_ttfb_ms"),
-            total_input_tokens=stats.get("total_input_tokens"),
-            total_output_tokens=stats.get("total_output_tokens"),
-            error_count=stats.get("error_count", 0),
-            avg_inter_chunk_ms=stats.get("avg_inter_chunk_ms"),
-            avg_total_chars=stats.get("avg_total_chars"),
-        )
-
-        runs = []
-        for i, r in enumerate(results):
-            runs.append(BenchmarkRun(
-                suite_id=suite_id, run_number=i + 1,
-                provider_id=r.provider_id, model=r.model,
-                status=r.status, error_message=r.error_message,
-                ttfb_ms=r.ttfb_ms, total_latency_ms=r.total_latency_ms,
-                tokens_per_second=r.tokens_per_second,
-                input_tokens=r.input_tokens, output_tokens=r.output_tokens,
-                total_tokens=r.total_tokens,
-                response_preview=r.response_text[:500] if r.response_text else None,
-                inter_chunk_ms_avg=r.inter_chunk_ms_avg or None,
-                inter_chunk_ms_p95=r.inter_chunk_ms_p95 or None,
-                total_chars=r.total_chars or None,
-                total_words=r.total_words or None,
-            ))
-
-        async with get_db() as session:
-            session.add(suite)
-            session.add_all(runs)
 
     @staticmethod
     def _result_to_dict(r: RunResult) -> dict:
