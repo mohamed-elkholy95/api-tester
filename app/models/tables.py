@@ -1,11 +1,12 @@
 from sqlalchemy import Column, String, Integer, Float, DateTime, Text, ForeignKey, Enum as SAEnum
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import enum
 
+from app.models.base import Base  # shared declarative base
 
-class Base(DeclarativeBase):
-    pass
+# Side-effect import: registers ProviderSetting with Base.metadata
+import app.models.api_settings  # noqa: F401
 
 
 class SuiteStatus(str, enum.Enum):

@@ -15,7 +15,8 @@ async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_o
 
 
 async def init_db():
-    from app.models.tables import Base
+    from app.models.base import Base
+    import app.models.tables  # noqa: F401 — registers all ORM models with Base.metadata
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await migrate_db()
