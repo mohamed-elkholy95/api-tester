@@ -1016,3 +1016,138 @@ tbody tr:hover {
 .cold-results {
     margin-top: 0.5rem;
 }
+
+/* ===== Settings View ===== */
+.settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.settings-header {
+    padding: 1.25rem 1.5rem;
+}
+
+.settings-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.settings-title-row h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.settings-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.settings-desc code {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    background: rgba(99, 102, 241, 0.1);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--accent-primary);
+}
+
+/* ===== Provider Modal ===== */
+.provider-modal-inner {
+    max-width: 680px;
+    max-height: 88vh;
+}
+
+.modal-body {
+    padding-top: 0.5rem;
+}
+
+.modal-body .config-form,
+.modal-body form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Models row: textarea + fetch button side by side */
+.models-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+}
+
+.models-row textarea {
+    flex: 1;
+    padding: 0.6rem 0.8rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    outline: none;
+    resize: vertical;
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.models-row textarea:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.btn-fetch-models {
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+}
+
+/* Form hints */
+.form-hint {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 0.3rem;
+}
+
+/* Checkbox label */
+.form-check-group {
+    padding: 0.2rem 0;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.checkbox-label code {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    background: rgba(99, 102, 241, 0.1);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--accent-primary);
+}

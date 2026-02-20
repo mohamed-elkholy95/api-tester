@@ -90,3 +90,46 @@ async function deleteAllHistory() {
     if (!resp.ok) throw new Error("Failed to delete all history");
     return resp.json();
 }
+
+// ─── Settings API ──────────────────────────────────────────────────────────
+
+const settingsApi = {
+    async listProviders() {
+        const resp = await fetch("/api/v1/settings/providers");
+        if (!resp.ok) throw new Error("Failed to fetch DB providers");
+        return resp.json();
+    },
+
+    async upsertProvider(data) {
+        const resp = await fetch("/api/v1/settings/providers", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+            throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+        return resp.json();
+    },
+
+    async deleteProvider(id) {
+        const resp = await fetch(`/api/v1/settings/providers/${encodeURIComponent(id)}`, {
+            method: "DELETE",
+        });
+        if (!resp.ok && resp.status !== 204) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+            throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+    },
+
+    async fetchRemoteModels(id) {
+        const resp = await fetch(`/api/v1/settings/providers/${encodeURIComponent(id)}/models`);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+            throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+        return resp.json(); // { provider_id, models: [...] }
+    },
+};
+

@@ -24,6 +24,7 @@
         setupForm();
         setupHistory();
         setupSpeedTests();
+        setupSettings();
         await loadProviders();
         await loadPastResults();
     });
@@ -86,6 +87,7 @@
                 $$('.view').forEach(v => v.classList.remove('active'));
                 $(`#${view}-view`).classList.add('active');
                 if (view === 'history') loadHistory();
+                if (view === 'settings') loadSettingsProviders();
             });
         });
     }
@@ -850,6 +852,171 @@
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
+    }
+
+    // ===== Settings =====
+
+    function openProviderModal(provider = null) {
+        const isEdit = !!provider;
+        $('#provider-modal-title').textContent = isEdit ? 'Edit Provider' : 'Add Provider';
+        $('#provider-edit-id-orig').value = isEdit ? provider.id : '';
+        $('#provider-id').value = isEdit ? provider.id : '';
+        $('#provider-id').disabled = isEdit; // ID is immutable on edit
+        $('#provider-name').value = isEdit ? provider.name : '';
+        $('#provider-base-url').value = isEdit ? provider.base_url : '';
+        $('#provider-api-key').value = ''; // never pre-fill password
+        $('#provider-models').value = isEdit ? provider.models.join(', ') : '';
+        $('#provider-default-model').value = isEdit ? provider.default_model : '';
+        $('#provider-min-temp').value = isEdit ? provider.min_temperature : 0;
+        $('#provider-stream-usage').checked = isEdit ? provider.supports_stream_usage : true;
+        $('#provider-extra-headers').value = isEdit ? JSON.stringify(provider.extra_headers || {}, null, 2) : '{}';
+        $('#fetch-models-status').textContent = '';
+        $('#provider-modal').classList.remove('hidden');
+        lucide.createIcons();
+    }
+
+    function closeProviderModal() {
+        $('#provider-modal').classList.add('hidden');
+        $('#provider-form').reset();
+    }
+
+    async function loadSettingsProviders() {
+        const tbody = $('#settings-providers-tbody');
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Loading…</td></tr>';
+        try {
+            const providers = await settingsApi.listProviders();
+            if (providers.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No DB providers yet. Click <strong>Add Provider</strong> to get started.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = '';
+            for (const p of providers) {
+                const tr = document.createElement('tr');
+                tr.className = 'fade-in';
+                tr.innerHTML = `
+                    <td><code>${escapeHtml(p.id)}</code></td>
+                    <td>${escapeHtml(p.name)}</td>
+                    <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(p.base_url)}</td>
+                    <td>${p.api_key_hint ? `<span class="status-badge status-success">✓ set</span>` : '<span class="status-badge status-error">not set</span>'}</td>
+                    <td>${p.models.length} model${p.models.length !== 1 ? 's' : ''}</td>
+                    <td style="display:flex; gap:0.4rem;">
+                        <button class="btn btn-sm btn-outline edit-provider-btn" data-id="${escapeHtml(p.id)}">
+                            <i data-lucide="pencil" class="icon-btn-sm"></i> Edit
+                        </button>
+                        <button class="btn btn-sm btn-danger delete-provider-btn" data-id="${escapeHtml(p.id)}">
+                            <i data-lucide="trash-2" class="icon-btn-sm"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            }
+            // Store for quick lookup by ID during edit
+            window._settingsProviderCache = Object.fromEntries(providers.map(p => [p.id, p]));
+            lucide.createIcons();
+
+            $$('.edit-provider-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const p = window._settingsProviderCache[btn.dataset.id];
+                    if (p) openProviderModal(p);
+                });
+            });
+            $$('.delete-provider-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    if (!confirm(`Delete provider "${btn.dataset.id}"? This cannot be undone.`)) return;
+                    try {
+                        await settingsApi.deleteProvider(btn.dataset.id);
+                        await loadSettingsProviders();
+                        await loadProviders(); // refresh all dropdowns
+                    } catch (e) {
+                        alert('Delete failed: ' + e.message);
+                    }
+                });
+            });
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="color:var(--accent-danger);">Error: ${e.message}</td></tr>`;
+        }
+    }
+
+    function setupSettings() {
+        // Add provider button
+        $('#add-provider-btn')?.addEventListener('click', () => openProviderModal(null));
+
+        // Close modal
+        $('#close-provider-modal-btn')?.addEventListener('click', closeProviderModal);
+        $('#cancel-provider-btn')?.addEventListener('click', closeProviderModal);
+        $('#provider-modal')?.addEventListener('click', (e) => {
+            if (e.target === $('#provider-modal')) closeProviderModal();
+        });
+
+        // Fetch remote models
+        $('#fetch-models-btn')?.addEventListener('click', async () => {
+            const btn = $('#fetch-models-btn');
+            const status = $('#fetch-models-status');
+            const id = $('#provider-id').value.trim();
+            if (!id) {
+                status.textContent = '⚠ Enter a Provider ID first, then save once before fetching models.';
+                return;
+            }
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Fetching…';
+            status.textContent = '';
+            try {
+                const data = await settingsApi.fetchRemoteModels(id);
+                $('#provider-models').value = data.models.join(', ');
+                status.textContent = `✓ Fetched ${data.models.length} models`;
+            } catch (e) {
+                status.textContent = `⚠ ${e.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="download-cloud" class="icon-btn"></i> Fetch';
+                lucide.createIcons();
+            }
+        });
+
+        // Save / upsert
+        $('#provider-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const saveBtn = $('#save-provider-btn');
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="spinner"></span> Saving…';
+
+            const id = $('#provider-id').value.trim();
+            const origId = $('#provider-edit-id-orig').value;
+            const isEdit = !!origId;
+
+            // Parse models textarea
+            const modelsRaw = $('#provider-models').value;
+            const models = modelsRaw.split(',').map(m => m.trim()).filter(Boolean);
+
+            // Parse extra headers
+            let extraHeaders = {};
+            try { extraHeaders = JSON.parse($('#provider-extra-headers').value || '{}'); } catch (_) { }
+
+            const payload = {
+                id: isEdit ? origId : id,
+                name: $('#provider-name').value.trim(),
+                base_url: $('#provider-base-url').value.trim(),
+                api_key: $('#provider-api-key').value, // blank = keep existing (server handles)
+                models,
+                default_model: $('#provider-default-model').value.trim(),
+                supports_stream_usage: $('#provider-stream-usage').checked,
+                min_temperature: parseFloat($('#provider-min-temp').value) || 0,
+                extra_headers: extraHeaders,
+            };
+
+            try {
+                await settingsApi.upsertProvider(payload);
+                closeProviderModal();
+                await loadSettingsProviders();
+                await loadProviders(); // refresh all provider dropdowns
+            } catch (e) {
+                alert('Save failed: ' + e.message);
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<i data-lucide="save" class="icon-btn"></i> Save Provider';
+                lucide.createIcons();
+            }
+        });
     }
 
 })();

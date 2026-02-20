@@ -18,7 +18,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/css/style.css?v=8">
+    <link rel="stylesheet" href="/css/style.css?v=9">
 </head>
 
 <body>
@@ -39,6 +39,9 @@
                 </button>
                 <button class="nav-btn" data-view="speed" id="nav-speed">
                     <i data-lucide="rocket" class="icon-nav"></i> Speed Tests
+                </button>
+                <button class="nav-btn" data-view="settings" id="nav-settings">
+                    <i data-lucide="sliders-horizontal" class="icon-nav"></i> Settings
                 </button>
             </nav>
         </div>
@@ -439,11 +442,123 @@
                 </div>
             </section>
         </div>
+        <!-- Settings View -->
+        <div id="settings-view" class="view">
+            <section class="settings-section">
+                <div class="settings-header glass-card">
+                    <div class="settings-title-row">
+                        <h2><i data-lucide="sliders-horizontal" class="icon-section"></i> LLM Provider Settings</h2>
+                        <button class="btn btn-primary" id="add-provider-btn">
+                            <i data-lucide="plus" class="icon-btn"></i> Add Provider
+                        </button>
+                    </div>
+                    <p class="settings-desc">Manage LLM providers configured via the UI. These override <code>.env</code>-based providers with the same ID.</p>
+                </div>
+
+                <!-- Providers Table -->
+                <div class="table-card glass-card" id="settings-providers-card">
+                    <div class="table-wrapper">
+                        <table id="settings-providers-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Base URL</th>
+                                    <th>API Key</th>
+                                    <th>Models</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="settings-providers-tbody">
+                                <tr><td colspan="6" class="empty-state">Loading providers…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Provider Edit Modal -->
+        <div class="modal-overlay hidden" id="provider-modal">
+            <div class="modal glass-card provider-modal-inner">
+                <div class="modal-header">
+                    <h3 id="provider-modal-title">Add Provider</h3>
+                    <button class="btn btn-icon" id="close-provider-modal-btn">
+                        <i data-lucide="x" class="icon-btn"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form id="provider-form" autocomplete="off">
+                        <input type="hidden" id="provider-edit-id-orig">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="provider-id"><i data-lucide="tag" class="icon-label"></i> Provider ID</label>
+                                <input type="text" id="provider-id" placeholder="e.g. openrouter" required>
+                                <span class="form-hint">Lowercase letters, numbers, hyphens only</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="provider-name"><i data-lucide="pen-line" class="icon-label"></i> Display Name</label>
+                                <input type="text" id="provider-name" placeholder="e.g. OpenRouter" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="provider-base-url"><i data-lucide="link" class="icon-label"></i> Base URL</label>
+                            <input type="url" id="provider-base-url" placeholder="https://openrouter.ai/api/v1" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="provider-api-key"><i data-lucide="key" class="icon-label"></i> API Key</label>
+                            <input type="password" id="provider-api-key" placeholder="sk-… (leave blank to keep existing)" autocomplete="new-password">
+                        </div>
+                        <div class="form-group">
+                            <label for="provider-models"><i data-lucide="list" class="icon-label"></i> Models
+                                <span class="form-hint">(comma-separated)</span>
+                            </label>
+                            <div class="models-row">
+                                <textarea id="provider-models" rows="3" placeholder="model-id-1, model-id-2"></textarea>
+                                <button type="button" class="btn btn-outline btn-fetch-models" id="fetch-models-btn">
+                                    <i data-lucide="download-cloud" class="icon-btn"></i> Fetch
+                                </button>
+                            </div>
+                            <span class="form-hint" id="fetch-models-status"></span>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="provider-default-model"><i data-lucide="star" class="icon-label"></i> Default Model</label>
+                                <input type="text" id="provider-default-model" placeholder="Default model ID">
+                            </div>
+                            <div class="form-group">
+                                <label for="provider-min-temp"><i data-lucide="thermometer" class="icon-label"></i> Min Temperature</label>
+                                <input type="number" id="provider-min-temp" value="0" min="0" max="2" step="0.01">
+                            </div>
+                        </div>
+                        <div class="form-group form-check-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="provider-stream-usage" checked>
+                                <span>Supports <code>stream_options.include_usage</code></span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="provider-extra-headers"><i data-lucide="code" class="icon-label"></i> Extra Headers
+                                <span class="form-hint">(JSON object)</span>
+                            </label>
+                            <textarea id="provider-extra-headers" rows="2" placeholder='{"X-Title": "My App"}'>{}</textarea>
+                        </div>
+                        <div class="modal-actions">
+                            <button type="button" class="btn btn-outline" id="cancel-provider-btn">Cancel</button>
+                            <button type="submit" class="btn btn-primary" id="save-provider-btn">
+                                <i data-lucide="save" class="icon-btn"></i> Save Provider
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
     </main>
 
-    <script src="/js/api.js?v=8"></script>
-    <script src="/js/charts.js?v=8"></script>
-    <script src="/js/app.js?v=8"></script>
+    <script src="/js/api.js?v=9"></script>
+    <script src="/js/charts.js?v=9"></script>
+    <script src="/js/app.js?v=9"></script>
     <script>
         // Initialize Lucide icons after DOM load
         document.addEventListener('DOMContentLoaded', () => {
